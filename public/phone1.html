@@ -1,69 +1,58 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="tr">
 <head>
-  <meta charset="UTF-8" />
+  <meta charset="UTF-8">
   <title>Phone 1</title>
-  <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
 </head>
 <body>
   <h2>Phone 1</h2>
-  <button id="call">Call Phone 2</button>
-
+  <button id="startBtn">Aramayı Başlat</button>
   <script>
-    const socket = io("wss://sesl-gorusme.onrender.com", {
-      transports: ["websocket"]
-    });
+    const socket = new WebSocket("wss://sesl-gorusme.onrender.com/ws");
 
-    let localStream;
-    let peerConnection;
-
-    const servers = {
+    const peer = new RTCPeerConnection({
       iceServers: [
-        { urls: "stun:stun.l.google.com:19302" }
+        { urls: "stun:stun.l.google.com:19302" },
+        {
+          urls: "turn:numb.viagenie.ca",
+          username: "webrtc@live.com",
+          credential: "muazkh"
+        }
       ]
-    };
-
-    document.getElementById("call").onclick = async () => {
-      localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      peerConnection = new RTCPeerConnection(servers);
-
-      localStream.getTracks().forEach(track => {
-        peerConnection.addTrack(track, localStream);
-      });
-
-      peerConnection.onicecandidate = event => {
-        if (event.candidate) {
-          socket.emit("ice-candidate", { candidate: event.candidate, to: "phone2" });
-        }
-      };
-
-      peerConnection.ontrack = event => {
-        const audio = document.createElement("audio");
-        audio.srcObject = event.streams[0];
-        audio.autoplay = true;
-        document.body.appendChild(audio);
-      };
-
-      const offer = await peerConnection.createOffer();
-      await peerConnection.setLocalDescription(offer);
-      socket.emit("offer", { sdp: offer, to: "phone2" });
-    };
-
-    socket.on("answer", async (message) => {
-      if (peerConnection) {
-        await peerConnection.setRemoteDescription(new RTCSessionDescription(message.sdp));
-      }
     });
 
-    socket.on("ice-candidate", async (message) => {
-      if (peerConnection) {
-        try {
-          await peerConnection.addIceCandidate(new RTCIceCandidate(message.candidate));
-        } catch (e) {
-          console.error("Error adding ice candidate", e);
-        }
-      }
+    navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
+      stream.getTracks().forEach(track => peer.addTrack(track, stream));
     });
+
+    peer.ontrack = (event) => {
+      const audio = document.createElement("audio");
+      audio.srcObject = event.streams[0];
+      audio.autoplay = true;
+      document.body.appendChild(audio);
+    };
+
+    socket.onmessage = async (event) => {
+      const message = JSON.parse(event.data);
+      if (message.answer) {
+        await peer.setRemoteDescription(new RTCSessionDescription(message.answer));
+      }
+      if (message.candidate) {
+        await peer.addIceCandidate(new RTCIceCandidate(message.candidate));
+      }
+    };
+
+    peer.onicecandidate = (event) => {
+      if (event.candidate) {
+        socket.send(JSON.stringify({ candidate: event.candidate }));
+      }
+    };
+
+    document.getElementById("startBtn").onclick = async () => {
+      const offer = await peer.createOffer();
+      await peer.setLocalDescription(offer);
+      socket.send(JSON.stringify({ offer }));
+    };
   </script>
 </body>
 </html>
