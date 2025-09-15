@@ -5,10 +5,10 @@ const WebSocket = require("ws");
 const app = express();
 const server = http.createServer(app);
 
-// Public klasöründeki dosyaları sun
+// public klasöründeki dosyaları sun
 app.use(express.static("public"));
 
-// WebSocket sunucusu
+// WebSocket sunucusu (signaling için)
 const wss = new WebSocket.Server({ server, path: "/ws" });
 
 wss.on("connection", (ws) => {
@@ -28,7 +28,6 @@ wss.on("connection", (ws) => {
   });
 });
 
-// Render ortamında portu Render verir, localde 10000 kullan
 const PORT = process.env.PORT || 10000;
 server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);

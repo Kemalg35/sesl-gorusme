@@ -1,53 +1,59 @@
 <!DOCTYPE html>
-<html lang="tr">
+<html lang="en">
 <head>
   <meta charset="UTF-8">
   <title>Phone 2</title>
 </head>
 <body>
-  <h2>Phone 2</h2>
+  <h1>Phone 2</h1>
+  <audio id="remoteAudio" autoplay></audio>
+
   <script>
-    const socket = new WebSocket("wss://sesl-gorusme.onrender.com/ws");
+    const ws = new WebSocket("wss://sesl-gorusme.onrender.com/ws");
+    let pc;
+    let localStream;
 
-    const peer = new RTCPeerConnection({
-      iceServers: [
-        { urls: "stun:stun.l.google.com:19302" },
-        {
-          urls: "turn:numb.viagenie.ca",
-          username: "webrtc@live.com",
-          credential: "muazkh"
+    async function init() {
+      localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      pc = new RTCPeerConnection({
+        iceServers: [
+          { urls: "stun:stun.l.google.com:19302" },
+          { 
+            urls: "turn:numb.viagenie.ca",
+            username: "webrtc@live.com",
+            credential: "muazkh"
+          }
+        ]
+      });
+
+      pc.ontrack = (event) => {
+        document.getElementById("remoteAudio").srcObject = event.streams[0];
+      };
+
+      localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+
+      pc.onicecandidate = (event) => {
+        if (event.candidate) ws.send(JSON.stringify({ type: "candidate", candidate: event.candidate }));
+      };
+
+      ws.onmessage = async (msg) => {
+        const data = JSON.parse(msg.data);
+        if (data.type === "offer") {
+          await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
+          const answer = await pc.createAnswer();
+          await pc.setLocalDescription(answer);
+          ws.send(JSON.stringify({ type: "answer", answer }));
+        } else if (data.type === "answer") {
+          await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
+        } else if (data.type === "candidate") {
+          await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
         }
-      ]
-    });
+      };
+    }
 
-    navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
-      stream.getTracks().forEach(track => peer.addTrack(track, stream));
-    });
-
-    peer.ontrack = (event) => {
-      const audio = document.createElement("audio");
-      audio.srcObject = event.streams[0];
-      audio.autoplay = true;
-      document.body.appendChild(audio);
-    };
-
-    socket.onmessage = async (event) => {
-      const message = JSON.parse(event.data);
-      if (message.offer) {
-        await peer.setRemoteDescription(new RTCSessionDescription(message.offer));
-        const answer = await peer.createAnswer();
-        await peer.setLocalDescription(answer);
-        socket.send(JSON.stringify({ answer }));
-      }
-      if (message.candidate) {
-        await peer.addIceCandidate(new RTCIceCandidate(message.candidate));
-      }
-    };
-
-    peer.onicecandidate = (event) => {
-      if (event.candidate) {
-        socket.send(JSON.stringify({ candidate: event.candidate }));
-      }
+    ws.onopen = async () => {
+      await init();
+      // Phone2 offer oluşturmaz, sadece cevap verir
     };
   </script>
 </body>
