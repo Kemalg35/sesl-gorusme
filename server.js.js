@@ -1,23 +1,40 @@
 const express = require('express');
+const http = require('http');
+const { Server } = require('socket.io');
+const path = require('path');
+
 const app = express();
-const http = require('http').createServer(app);
-const io = require('socket.io')(http);
+const server = http.createServer(app);
+const io = new Server(server);
 
-app.use(express.static('public'));
-app.use(express.json());
+app.use(express.static(path.join(__dirname, 'public')));
 
-app.post('/incoming-call', (req, res) => {
-  console.log('ESP tetikledi:', req.body || {});
-  io.emit('incoming-trigger');
-  res.sendStatus(200);
+// Root URL direkt phone1.html açar
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public/phone1.html'));
 });
 
-io.on('connection', (socket) => {
-  console.log('Socket bağlandı', socket.id);
-  socket.on('offer', (offer) => socket.broadcast.emit('offer', offer));
-  socket.on('answer', (answer) => socket.broadcast.emit('answer', answer));
-  socket.on('ice', (candidate) => socket.broadcast.emit('ice', candidate));
+// Socket.io signaling
+io.on('connection', socket => {
+  console.log('User connected:', socket.id);
+
+  socket.on('offer', data => {
+    io.to(data.to).emit('offer', { sdp: data.sdp, from: socket.id });
+  });
+
+  socket.on('answer', data => {
+    io.to(data.to).emit('answer', { sdp: data.sdp, from: socket.id });
+  });
+
+  socket.on('ice-candidate', data => {
+    io.to(data.to).emit('ice-candidate', { candidate: data.candidate, from: socket.id });
+  });
+
+  socket.on('register', data => {
+    socket.join(data.name);
+    console.log(`${data.name} registered with id: ${socket.id}`);
+  });
 });
 
 const PORT = process.env.PORT || 3000;
-http.listen(PORT, () => console.log('Signaling server listening on', PORT));
+server.listen(PORT, () => console.log(`Server running on port ${PORT}`));

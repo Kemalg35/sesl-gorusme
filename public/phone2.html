@@ -1,35 +1,55 @@
-<!doctype html>
+<!DOCTYPE html>
 <html>
-<head><meta charset="utf-8"><title>Phone2</title></head>
+<head>
+  <meta charset="utf-8">
+  <title>Phone 2</title>
+</head>
 <body>
-<h3>Phone-2 (callee)</h3>
-<button id="enable">Enable microphone & ready</button>
-<audio id="remote" autoplay></audio>
+<h2>Phone 2</h2>
+<audio id="remoteAudio" autoplay></audio>
 
 <script src="/socket.io/socket.io.js"></script>
 <script>
 const socket = io();
-let pc, localStream;
+const pc = new RTCPeerConnection();
+let localStream;
 
-document.getElementById('enable').onclick = async () => {
-  localStream = await navigator.mediaDevices.getUserMedia({audio: true});
-  document.getElementById('enable').disabled = true;
-  console.log('Mic aktif, hazır.');
+// Mikrofonu al
+navigator.mediaDevices.getUserMedia({ audio: true })
+  .then(stream => {
+    localStream = stream;
+    localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+  });
+
+// Remote audio
+pc.ontrack = e => {
+  document.getElementById('remoteAudio').srcObject = e.streams[0];
 };
 
-socket.on('offer', async (offer) => {
-  if (!localStream) return;
-  pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]});
-  pc.ontrack = e => document.getElementById('remote').srcObject = e.streams[0];
-  pc.onicecandidate = e => { if (e.candidate) socket.emit('ice', e.candidate); };
-  localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
-  await pc.setRemoteDescription(offer);
+// ICE Candidate
+pc.onicecandidate = e => {
+  if (e.candidate) {
+    socket.emit('ice-candidate', { candidate: e.candidate, to: 'phone1' });
+  }
+};
+
+// Socket.io signaling
+socket.emit('register', { name: 'phone2' });
+
+socket.on('offer', async data => {
+  await pc.setRemoteDescription(data.sdp);
   const answer = await pc.createAnswer();
   await pc.setLocalDescription(answer);
-  socket.emit('answer', answer);
+  socket.emit('answer', { sdp: answer, to: data.from });
 });
 
-socket.on('ice', c => { if (pc) pc.addIceCandidate(c).catch(()=>{}); });
+socket.on('answer', async data => {
+  await pc.setRemoteDescription(data.sdp);
+});
+
+socket.on('ice-candidate', data => {
+  pc.addIceCandidate(data.candidate);
+});
 </script>
 </body>
 </html>
