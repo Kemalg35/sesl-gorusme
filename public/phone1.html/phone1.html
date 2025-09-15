@@ -1,0 +1,36 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Phone1</title></head>
+<body>
+<h3>Phone-1 (caller)</h3>
+<button id="enable">Enable microphone & ready</button>
+<audio id="remote" autoplay></audio>
+
+<script src="/socket.io/socket.io.js"></script>
+<script>
+const socket = io(); 
+let pc, localStream;
+
+document.getElementById('enable').onclick = async () => {
+  localStream = await navigator.mediaDevices.getUserMedia({audio: true});
+  document.getElementById('enable').disabled = true;
+  console.log('Mic aktif, hazır.');
+};
+
+socket.on('incoming-trigger', async () => {
+  console.log('Incoming trigger alındı.');
+  if (!localStream) return;
+  pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]});
+  pc.ontrack = e => document.getElementById('remote').srcObject = e.streams[0];
+  pc.onicecandidate = e => { if (e.candidate) socket.emit('ice', e.candidate); };
+  localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
+  const offer = await pc.createOffer();
+  await pc.setLocalDescription(offer);
+  socket.emit('offer', offer);
+});
+
+socket.on('answer', async ans => { if (pc) await pc.setRemoteDescription(ans); });
+socket.on('ice', c => { if (pc) pc.addIceCandidate(c).catch(()=>{}); });
+</script>
+</body>
+</html>
