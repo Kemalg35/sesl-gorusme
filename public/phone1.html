@@ -1,65 +1,56 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <meta charset="utf-8">
+  <meta charset="UTF-8">
   <title>Phone 1</title>
 </head>
 <body>
-<h2>Phone 1</h2>
-<audio id="remoteAudio" autoplay></audio>
+  <h1>Phone 1</h1>
+  <audio id="remoteAudio" autoplay></audio>
 
-<script src="/socket.io/socket.io.js"></script>
-<script>
-const socket = io();
-const pc = new RTCPeerConnection();
-let localStream;
+  <script>
+    const socket = new WebSocket("wss://sesl-gorusme.onrender.com");
+    const pc = new RTCPeerConnection({
+      iceServers: [
+        { urls: "stun:stun.l.google.com:19302" },
+        { urls: "turn:numb.viagenie.ca", username: "webrtc@live.com", credential: "muazkh" }
+      ]
+    });
 
-// Mikrofonu al
-navigator.mediaDevices.getUserMedia({ audio: true })
-  .then(stream => {
-    localStream = stream;
-    localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
-  });
+    // Mikrofonu al
+    navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
+      stream.getTracks().forEach(track => pc.addTrack(track, stream));
+    });
 
-// Remote audio
-pc.ontrack = e => {
-  document.getElementById('remoteAudio').srcObject = e.streams[0];
-};
+    // Karşı tarafın sesini çal
+    pc.ontrack = e => {
+      document.getElementById('remoteAudio').srcObject = e.streams[0];
+    };
 
-// ICE Candidate
-pc.onicecandidate = e => {
-  if (e.candidate) {
-    socket.emit('ice-candidate', { candidate: e.candidate, to: 'phone2' });
-  }
-};
+    // ICE candidate geldiğinde servera gönder
+    pc.onicecandidate = e => {
+      if (e.candidate) socket.send(JSON.stringify({ type: 'ice', candidate: e.candidate }));
+    };
 
-// Socket.io signaling
-socket.emit('register', { name: 'phone1' });
+    socket.onmessage = async (msg) => {
+      const data = JSON.parse(msg.data);
+      if (data.type === 'offer') {
+        await pc.setRemoteDescription(data);
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        socket.send(JSON.stringify(answer));
+      } else if (data.type === 'answer') {
+        await pc.setRemoteDescription(data);
+      } else if (data.type === 'ice') {
+        await pc.addIceCandidate(data.candidate);
+      }
+    };
 
-socket.on('offer', async data => {
-  await pc.setRemoteDescription(data.sdp);
-  const answer = await pc.createAnswer();
-  await pc.setLocalDescription(answer);
-  socket.emit('answer', { sdp: answer, to: data.from });
-});
-
-socket.on('answer', async data => {
-  await pc.setRemoteDescription(data.sdp);
-});
-
-socket.on('ice-candidate', data => {
-  pc.addIceCandidate(data.candidate);
-});
-
-// Otomatik çağrı
-async function callPhone2() {
-  const offer = await pc.createOffer();
-  await pc.setLocalDescription(offer);
-  socket.emit('offer', { sdp: offer, to: 'phone2' });
-}
-
-// 2 saniye sonra otomatik arama
-setTimeout(callPhone2, 2000);
-</script>
+    // Offer gönder (Phone1 başlangıçta offer oluşturuyor)
+    pc.createOffer().then(offer => {
+      pc.setLocalDescription(offer);
+      socket.send(JSON.stringify(offer));
+    });
+  </script>
 </body>
 </html>
