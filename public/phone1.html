@@ -45,6 +45,12 @@ callBtn.onclick = async ()=>{
 ws.onmessage = async (msg)=>{
   const data = JSON.parse(msg.data);
 
+  // --- Heartbeat cevapları ---
+  if(data.type === "pong"){
+    console.log("Pong alındı → bağlantı canlı 👍");
+    return;
+  }
+
   if(data.type === "callAccepted"){
     startCall();
   }
@@ -61,6 +67,13 @@ ws.onmessage = async (msg)=>{
     endCall();
   }
 };
+
+// --- Heartbeat: 10 sn’de bir ping gönder ---
+setInterval(()=>{
+  if(ws.readyState === WebSocket.OPEN){
+    ws.send(JSON.stringify({type:"ping"}));
+  }
+}, 10000);
 
 // WebRTC başlat
 async function startCall(){
