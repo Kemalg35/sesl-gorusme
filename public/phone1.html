@@ -5,61 +5,98 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Phone1 Panel</title>
 <style>
-body { font-family: Arial,sans-serif; margin:0; padding:0; height:100vh; display:flex; flex-direction:column; justify-content:center; align-items:center; background:#e0f7fa; }
-h1 { color:#004d40; margin-bottom:30px; font-size:28px; text-align:center; }
-button { font-size:20px; padding:15px 40px; border:none; border-radius:10px; cursor:pointer; background:#43a047; color:white; margin-bottom:20px; }
-#statusText { font-size:22px; font-weight:bold; color:#00695c; margin-top:20px; min-height:30px; text-align:center; transition: all 0.3s; }
+  body { font-family: Arial, sans-serif; text-align:center; background:#fff8f0; }
+  h1 { color:#bf360c; }
+  button { font-size:20px; padding:12px 30px; margin:10px; border:none; border-radius:10px; cursor:pointer; }
+  #callBtn { background:#43a047; color:white; }
+  #endBtn { background:#e53935; color:white; display:none; }
 </style>
 </head>
 <body>
 
-<h1>İnterkom Konuşma Paneli</h1>
-<button id="startCall">Çağrı Başlat</button>
-<div id="statusText"></div>
+<h1>Phone1 Panel</h1>
+<button id="callBtn">Çağrı Başlat</button>
+<button id="endBtn">Görüşmeyi Sonlandır</button>
+
+<audio id="remoteAudio" autoplay></audio>
 
 <script>
 const ws = new WebSocket("wss://sesl-gorusme.onrender.com/ws");
-const startBtn = document.getElementById('startCall');
-const statusText = document.getElementById('statusText');
+let pc;
+let localStream;
 
-let callQueue = []; // Kuyruk
-let activeCall = false;
+const callBtn = document.getElementById('callBtn');
+const endBtn = document.getElementById('endBtn');
+const remoteAudio = document.getElementById('remoteAudio');
 
-// WebSocket açıldı
-ws.onopen = ()=> console.log("Phone1 WebSocket bağlandı");
+// ICE Servers
+const iceServers = [
+  { urls: "stun:stun.relay.metered.ca:80" },
+  { urls: "turn:standard.relay.metered.ca:80", username: "d648d4967e580d04e7c7b9be", credential: "evt4C7YBa+aWhUrI" },
+  { urls: "turn:standard.relay.metered.ca:443", username: "d648d4967e580d04e7c7b9be", credential: "evt4C7YBa+aWhUrI" }
+];
 
-// Kuyruktaki çağrıyı işleme alma
-function processQueue(){
-    if(activeCall || callQueue.length===0) return;
-    activeCall = true;
-    const callData = callQueue.shift();
-
-    // Phone2’ye çağrı iletiliyor
-    ws.send(JSON.stringify({ type: "incomingCall", payload: callData }));
-    statusText.innerText = "OPERATÖR ARANIYOR";
-}
-
-// Yeni çağrı ekleme (buton veya ESP)
-function addCallToQueue(callInfo = {}){
-    callQueue.push(callInfo);
-    processQueue();
-}
-
-// Butona basınca çağrı ekleme
-startBtn.addEventListener('click', ()=> addCallToQueue({from:"Phone1"}));
-
-// ESP’den çağrı geldiğinde ekleme
-ws.onmessage = (msg)=>{
-    const data = JSON.parse(msg.data);
-    if(data.type === "incomingCallFromESP"){ // ESP çağrısı geldi
-        addCallToQueue({from:"ESP"});
-    } else if(data.type === "callEnded"){ // Phone2 çağrıyı sonlandırdı
-        activeCall = false;
-        statusText.innerText = "";
-        processQueue(); // Kuyruktaki diğer çağrıyı başlat
-    }
+// Çağrı başlat
+callBtn.onclick = async ()=>{
+  ws.send(JSON.stringify({type:"incomingCall"})); // Phone2'ye bildirim
 };
-</script>
 
+// WebSocket mesajları
+ws.onmessage = async (msg)=>{
+  const data = JSON.parse(msg.data);
+
+  if(data.type === "callAccepted"){
+    startCall();
+  }
+
+  if(data.type === "answer" && pc){
+    await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
+  }
+
+  if(data.type === "candidate" && pc){
+    await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
+  }
+
+  if(data.type === "callEnded"){
+    endCall();
+  }
+};
+
+// WebRTC başlat
+async function startCall(){
+  pc = new RTCPeerConnection({iceServers});
+  pc.ontrack = (event)=> { remoteAudio.srcObject = event.streams[0]; };
+  pc.onicecandidate = (event)=>{ if(event.candidate) ws.send(JSON.stringify({type:"candidate", candidate:event.candidate})); };
+
+  localStream = await navigator.mediaDevices.getUserMedia({ audio:true });
+  localStream.getTracks().forEach(track=>pc.addTrack(track, localStream));
+
+  const offer = await pc.createOffer();
+  await pc.setLocalDescription(offer);
+  ws.send(JSON.stringify({type:"offer", offer}));
+
+  callBtn.style.display='none';
+  endBtn.style.display='inline-block';
+}
+
+// Çağrıyı sonlandır
+endBtn.onclick = ()=>{
+  ws.send(JSON.stringify({type:"callEnded"}));
+  endCall();
+};
+
+// Ortak temizleme
+function endCall(){
+  if(pc){
+    pc.getSenders().forEach(sender=>sender.track.stop());
+    pc.close();
+    pc=null;
+    localStream=null;
+  }
+  remoteAudio.srcObject=null;
+  callBtn.style.display='inline-block';
+  endBtn.style.display='none';
+}
+</script>
 </body>
 </html>
