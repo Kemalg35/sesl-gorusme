@@ -12,6 +12,7 @@
     const ws = new WebSocket("wss://sesl-gorusme.onrender.com/ws");
     let pc;
     let localStream;
+    let heartbeatInterval;
 
     async function init() {
       localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -38,6 +39,7 @@
 
       ws.onmessage = async (msg) => {
         const data = JSON.parse(msg.data);
+
         if (data.type === "offer") {
           await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
           const answer = await pc.createAnswer();
@@ -45,13 +47,30 @@
           ws.send(JSON.stringify({ type: "answer", answer }));
         } else if (data.type === "candidate") {
           await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
+        } else if (data.type === "pong") {
+          console.log("✅ Pong alındı, bağlantı canlı.");
         }
       };
     }
 
     ws.onopen = async () => {
       await init();
-      // Phone2 sadece cevap gönderir, offer oluşturmaz
+
+      // 🔹 Heartbeat: her 10 saniyede bir ping gönder
+      heartbeatInterval = setInterval(() => {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: "ping" }));
+        }
+      }, 10000);
+    };
+
+    ws.onclose = () => {
+      console.log("❌ WebSocket kapandı");
+      clearInterval(heartbeatInterval);
+    };
+
+    ws.onerror = (err) => {
+      console.error("⚠️ WebSocket hatası:", err);
     };
   </script>
 </body>
