@@ -1,57 +1,65 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="tr">
 <head>
-  <meta charset="UTF-8">
-  <title>Phone 1</title>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Phone1 Panel</title>
+<style>
+body { font-family: Arial,sans-serif; margin:0; padding:0; height:100vh; display:flex; flex-direction:column; justify-content:center; align-items:center; background:#e0f7fa; }
+h1 { color:#004d40; margin-bottom:30px; font-size:28px; text-align:center; }
+button { font-size:20px; padding:15px 40px; border:none; border-radius:10px; cursor:pointer; background:#43a047; color:white; margin-bottom:20px; }
+#statusText { font-size:22px; font-weight:bold; color:#00695c; margin-top:20px; min-height:30px; text-align:center; transition: all 0.3s; }
+</style>
 </head>
 <body>
-  <h1>Phone 1</h1>
-  <audio id="remoteAudio" autoplay></audio>
 
-  <script>
-    const ws = new WebSocket("wss://sesl-gorusme.onrender.com/ws");
-    let pc;
-    let localStream;
+<h1>İnterkom Konuşma Paneli</h1>
+<button id="startCall">Çağrı Başlat</button>
+<div id="statusText"></div>
 
-    async function init() {
-      localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+<script>
+const ws = new WebSocket("wss://sesl-gorusme.onrender.com/ws");
+const startBtn = document.getElementById('startCall');
+const statusText = document.getElementById('statusText');
 
-      pc = new RTCPeerConnection({
-        iceServers: [
-          { urls: "stun:stun.relay.metered.ca:80" },
-          { urls: "turn:standard.relay.metered.ca:80", username: "d648d4967e580d04e7c7b9be", credential: "evt4C7YBa+aWhUrI" },
-          { urls: "turn:standard.relay.metered.ca:80?transport=tcp", username: "d648d4967e580d04e7c7b9be", credential: "evt4C7YBa+aWhUrI" },
-          { urls: "turn:standard.relay.metered.ca:443", username: "d648d4967e580d04e7c7b9be", credential: "evt4C7YBa+aWhUrI" },
-          { urls: "turns:standard.relay.metered.ca:443?transport=tcp", username: "d648d4967e580d04e7c7b9be", credential: "evt4C7YBa+aWhUrI" }
-        ]
-      });
+let callQueue = []; // Kuyruk
+let activeCall = false;
 
-      pc.ontrack = (event) => {
-        document.getElementById("remoteAudio").srcObject = event.streams[0];
-      };
+// WebSocket açıldı
+ws.onopen = ()=> console.log("Phone1 WebSocket bağlandı");
 
-      localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+// Kuyruktaki çağrıyı işleme alma
+function processQueue(){
+    if(activeCall || callQueue.length===0) return;
+    activeCall = true;
+    const callData = callQueue.shift();
 
-      pc.onicecandidate = (event) => {
-        if (event.candidate) ws.send(JSON.stringify({ type: "candidate", candidate: event.candidate }));
-      };
+    // Phone2’ye çağrı iletiliyor
+    ws.send(JSON.stringify({ type: "incomingCall", payload: callData }));
+    statusText.innerText = "OPERATÖR ARANIYOR";
+}
 
-      ws.onmessage = async (msg) => {
-        const data = JSON.parse(msg.data);
-        if (data.type === "answer") {
-          await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
-        } else if (data.type === "candidate") {
-          await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
-        }
-      };
+// Yeni çağrı ekleme (buton veya ESP)
+function addCallToQueue(callInfo = {}){
+    callQueue.push(callInfo);
+    processQueue();
+}
+
+// Butona basınca çağrı ekleme
+startBtn.addEventListener('click', ()=> addCallToQueue({from:"Phone1"}));
+
+// ESP’den çağrı geldiğinde ekleme
+ws.onmessage = (msg)=>{
+    const data = JSON.parse(msg.data);
+    if(data.type === "incomingCallFromESP"){ // ESP çağrısı geldi
+        addCallToQueue({from:"ESP"});
+    } else if(data.type === "callEnded"){ // Phone2 çağrıyı sonlandırdı
+        activeCall = false;
+        statusText.innerText = "";
+        processQueue(); // Kuyruktaki diğer çağrıyı başlat
     }
+};
+</script>
 
-    ws.onopen = async () => {
-      await init();
-      const offer = await pc.createOffer();
-      await pc.setLocalDescription(offer);
-      ws.send(JSON.stringify({ type: "offer", offer }));
-    };
-  </script>
 </body>
 </html>
